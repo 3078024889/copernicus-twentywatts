@@ -10,8 +10,9 @@
 *.db
 *.db-*
 *.zip
+*.bak
 data/
 checkpoints/
 artifacts/
-
 reports/competition.json
+reports/operations.json
