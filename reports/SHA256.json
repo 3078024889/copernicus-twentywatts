@@ -1,0 +1,8 @@
+{
+  "README.md": "99bbf46465854d00abd4b62f145f170310ba6ed6b519d5f6b56c369252ef1dee",
+  "tw8/arena.py": "c0363039d486cd78f49c89d0e062bd5973addeae06ca330cb01bb99f700c4507",
+  "tw8/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "data/tw8.sqlite": "c812b88ec139eb936134c7933ae558829ade2f02ab253fec34bfe5baf251d8bd",
+  "tests/test_arena.py": "09217ca0d03d7cc695614ce64a205067c868bd575b3a53f6072d6e17ea31eed1",
+  "reports/competition.json": "521730731f6a7a1a7a7ce90fb0bc02b313cd2cbb32977777cb211c2b6fcd3cb9"
+}
