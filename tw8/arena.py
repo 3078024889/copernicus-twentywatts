@@ -165,17 +165,3 @@ def report(db):
       'provisional_seats':db.execute('SELECT count(*) FROM seats WHERE protocol=?',(PROTOCOL,)).fetchone()[0],
       'certified_independent_ais':0,'mother_promotion':'LOCKED',
       'integrity':db.execute('PRAGMA integrity_check').fetchone()[0]}
-
-def main():
-    p=argparse.ArgumentParser();p.add_argument('--db',default='data/tw8.sqlite');p.add_argument('--screen-limit',type=int,default=7777)
-    p.add_argument('--output',default='reports/competition.json');a=p.parse_args()
-    db=connect(a.db);register(db);timings=screen(db,a.screen_limit)
-    ids=shortlist(db)
-    if a.screen_limit==7777:
-        timings['holdout_inserted']=verify(db,ids)
-        winners=select(db,ids)
-    else:winners=[]
-    result=report(db);result['time']=timings;result['shortlist']=len(ids);result['seats']=winners
-    Path(a.output).parent.mkdir(parents=True,exist_ok=True);Path(a.output).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
-    print(json.dumps({k:v for k,v in result.items() if k!='seats'},ensure_ascii=False,indent=2));db.close()
-if __name__=='__main__':main()

@@ -1,7 +1,8 @@
 import tempfile, unittest
 from pathlib import Path
 from tw10.operations import inspect,execute,single_writer
-SOURCE=Path(__file__).resolve().parents[1]/'data'/'v8.sqlite'
+from fixture_source import source_db
+SOURCE=source_db()
 class OperationsTest(unittest.TestCase):
     def test_read_only_audit(self):
         report=inspect(SOURCE,Path('/path/that/does/not/exist.sqlite'))

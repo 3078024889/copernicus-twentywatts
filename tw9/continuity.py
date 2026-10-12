@@ -4,10 +4,11 @@ Research identities persist weights and steps. A completed cycle is atomic.
 Unknown-task probes are never used for online updates.
 """
 from __future__ import annotations
-import argparse, json, random, sqlite3, statistics
+import argparse, json, random, sqlite3, statistics, math
 from contextlib import closing
 from pathlib import Path
 from tw8.arena import Candidate, Learner, dataset, registry, connect as v8_connect, shortlist as v8_shortlist, PROTOCOL as V8_PROTOCOL
+from tw10.guard import choose
 
 PROTOCOL = 'TW9_CONTINUITY_V1'
 TASKS = ('linear','interaction','shift')
@@ -44,14 +45,16 @@ def init_db(path):
 def setup(db, candidates):
     with db:
         for c in candidates:
-            state={'weights':[0.0]*(4 if c.family=='interaction' else 3),'steps':0}
+            state={'weights':[0.0]*(4 if c.family=='interaction' else 3),'steps':0,'experience_steps':0}
             db.execute('INSERT OR IGNORE INTO agents(id,definition,state) VALUES (?,?,?)',
                        (c.key,json.dumps(c.definition(),sort_keys=True),json.dumps(state)))
         saved=db.execute('SELECT COUNT(*) FROM agents').fetchone()[0]
         if saved!=len(candidates):
             raise ValueError('Refusing to mix incompatible study pools')
         manifest={'protocol':PROTOCOL,'pool':','.join(x.key for x in candidates),
-                  'source_protocol':V8_PROTOCOL}
+                  'source_protocol':V8_PROTOCOL,'learning_policy':'TW11_TRANSFER_GUARD_V1'}
+        if db.execute('SELECT COALESCE(SUM(cycles),0) FROM agents').fetchone()[0] > 0 and not db.execute("SELECT 1 FROM manifest WHERE key='learning_policy'").fetchone():
+            raise ValueError('Legacy checkpoint requires separate database: use data/v11.sqlite')
         for k,v in manifest.items():
             existing=db.execute('SELECT value FROM manifest WHERE key=?',(k,)).fetchone()
             if existing and existing[0]!=v:raise ValueError(f'manifest mismatch: {k}')
@@ -60,9 +63,9 @@ def setup(db, candidates):
 def restore(c,state):
     l=Learner(c)
     s=json.loads(state)
-    if len(s['weights'])!=len(l.w) or not all(isinstance(v,(int,float)) and abs(v)<1e8 for v in s['weights']):
+    if len(s['weights'])!=len(l.w) or not all(type(v) in (int,float) and math.isfinite(v) and abs(v)<1e8 for v in s['weights']):
         raise ValueError('Invalid checkpoint weights')
-    if not isinstance(s['steps'],int) or s['steps']<0:raise ValueError('Invalid checkpoint steps')
+    if type(s['steps']) is not int or s['steps']<0:raise ValueError('Invalid checkpoint steps')
     l.w=[float(v) for v in s['weights']];l.steps=s['steps'];return l
 
 def step(db,c):
@@ -83,6 +86,10 @@ def step(db,c):
     for x,y in train:negative.update(x,rng.randint(0,1))
     # Existing weights are retained across different tasks.
     for x,y in train:learner.update(x,y)
+    # The guard chooses without using the audit/test probe, preserving a clean
+    # separation between model selection and independently reported evidence.
+    decision=choose(learner,cold,seed=seed,task=task)
+    learner=decision.selected
     after=learner.accuracy(probe)
     # Forgetting probe uses an unseen dataset from the prior task.
     prev_task=TASKS[(cycle-1)%len(TASKS)]
@@ -91,8 +98,9 @@ def step(db,c):
              'delta':after-before,'cold_accuracy':cold.accuracy(probe),
              'negative_accuracy':negative.accuracy(probe),
              'prior_task_probe_accuracy':learner.accuracy(forgotten_probe),
-             'learning_steps':learner.steps,'kind':'SYNTHETIC_RESEARCH_ONLY'}
-    saved=json.dumps({'weights':learner.w,'steps':learner.steps},sort_keys=True)
+             'learning_steps':learner.steps,'transfer_guard':decision.details(),'kind':'SYNTHETIC_RESEARCH_ONLY'}
+    old_experience=json.loads(state).get('experience_steps',cycle*48)
+    saved=json.dumps({'weights':learner.w,'steps':learner.steps,'experience_steps':old_experience+len(train)},sort_keys=True)
     # Compare-and-swap transaction prevents accidental double advancement.
     with db:
         count=db.execute('UPDATE agents SET state=?,cycles=cycles+1,updated_utc=CURRENT_TIMESTAMP WHERE id=? AND cycles=?',
@@ -124,16 +132,7 @@ def report(db,advanced=0):
       'advanced_this_run':advanced,'evidence_records':len(results),
       'mean_longitudinal_minus_cold':round(statistics.fmean(r['after']-r['cold_accuracy'] for r in results),5) if results else None,
       'mean_after_minus_negative':round(statistics.fmean(r['after']-r['negative_accuracy'] for r in results),5) if results else None,
+      'transfer_guard':{'enabled':True,'reset_count':sum(x.get('transfer_guard',{}).get('action')=='reset' for x in results),'mean_audit_gain_vs_cold':round(statistics.fmean(x['transfer_guard']['audit_gain_vs_cold'] for x in results if 'transfer_guard' in x),5) if any('transfer_guard' in x for x in results) else None},
       'integrity':db.execute('PRAGMA integrity_check').fetchone()[0],
       'certified_independent_ais':0,'mother_promotion':'LOCKED',
       'note':'Participants are study candidates, not 12 certified independent AI systems.'}
-
-def main():
-    p=argparse.ArgumentParser(description='Bounded V9 continuity research run, no daemon or production promotion')
-    p.add_argument('--v8-db',required=True);p.add_argument('--db',default='data/v9.sqlite')
-    p.add_argument('--cycles',type=int,default=3);p.add_argument('--participants',type=int,default=12)
-    p.add_argument('--output',default='reports/v9.json');a=p.parse_args()
-    result=run(a.v8_db,a.db,a.cycles,a.participants)
-    path=Path(a.output);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding='utf8')
-    print(json.dumps(result,indent=2,ensure_ascii=False))
-if __name__=='__main__':main()

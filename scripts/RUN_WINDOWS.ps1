@@ -1,41 +1,42 @@
 param(
-  [ValidateSet('inspect','run','test')][string]$Action='inspect',
+  [ValidateSet('test','inspect','train','gate','benchmark','benchmark-repeat','verify')][string]$Action='verify',
+  [ValidateRange(1,100)][int]$Batches=1,
   [ValidateRange(1,25)][int]$Cycles=1,
   [ValidateRange(1,12)][int]$Participants=12,
   [string]$PythonExe='',
-  [switch]$Repeat,
-  [ValidateRange(15,86400)][int]$IntervalSeconds=600
+  [string]$SourceDB='',
+  [string]$StateDB='',
+  [string]$Report=''
 )
 $ErrorActionPreference='Stop'
 $Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-Set-Location $Root
-if (-not $PythonExe) {
-  $known='D:\.pnpm-store\v10\projects\9e93c800ae9918aa01436d35d6d66abf\_local\r64-db-runtime\python-test\python.exe'
-  if (Test-Path $known) { $PythonExe=$known }
-  else {
-    $candidate=Get-Command python -ErrorAction SilentlyContinue
-    if ($candidate -and $candidate.Source -notlike '*\WindowsApps\*') {$PythonExe=$candidate.Source}
-  }
-}
-if (-not $PythonExe -or -not (Test-Path $PythonExe)) {throw 'Python interpreter not found. Supply -PythonExe C:\path\python.exe'}
-& $PythonExe --version
-if ($LASTEXITCODE -ne 0) {throw 'Python interpreter failed'}
-# Supports embedded/isolated Python where -m package import does not resolve current directory.
-$code = @'
+$FallbackPython='D:\.pnpm-store\v10\projects\9e93c800ae9918aa01436d35d6d66abf\_local\r64-db-runtime\python-test\python.exe'
+if (-not $PythonExe -and (Test-Path -LiteralPath $FallbackPython)) { $PythonExe=$FallbackPython }
+if (-not $PythonExe -and (Get-Command py -ErrorAction SilentlyContinue)) { $PythonExe=(Get-Command py).Source }
+if (-not $PythonExe) { throw 'Python executable required: -PythonExe <full path>' }
+if (-not (Test-Path -LiteralPath $PythonExe)) { throw "Python not found: $PythonExe" }
+if (-not $SourceDB) { $SourceDB=Join-Path $Root 'data\v8.sqlite' }
+if (-not $StateDB) { $StateDB=Join-Path $Root 'data\v11.sqlite' }
+if (-not $Report) { $Report=Join-Path $Root 'reports\latest.json' }
+$SourceDB=[IO.Path]::GetFullPath($SourceDB)
+$StateDB=[IO.Path]::GetFullPath($StateDB)
+$Report=[IO.Path]::GetFullPath($Report)
+$Runner=@'
 import sys,runpy
-sys.path.insert(0,sys.argv[1])
-action=sys.argv[2]
-if action=='test':
- import unittest
- r=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.discover('tests'))
- raise SystemExit(0 if r.wasSuccessful() else 1)
-sys.argv=['tw10.operations',action,'--v8-db','data/v8.sqlite','--db','data/v9.sqlite','--cycles',sys.argv[3],'--participants',sys.argv[4],'--output','reports/operations.json']
-runpy.run_module('tw10.operations',run_name='__main__')
+root,action,src,state,batches,cycles,participants,report=sys.argv[1:]
+sys.path.insert(0,root)
+sys.argv=['tw10.cli',action,'--root',root,'--source-db',src,'--state-db',state,'--batches',batches,'--cycles',cycles,'--participants',participants,'--report',report]
+runpy.run_module('tw10.cli',run_name='__main__')
 '@
-if ($Repeat -and $Action -ne 'run') {throw '-Repeat can only be used with -Action run'}
-if ($Repeat) { Write-Host 'Foreground bounded research loop: Ctrl+C to stop. No autonomous production promotion.' }
-do {
-  & $PythonExe -c $code $Root $Action $Cycles $Participants
-  if ($LASTEXITCODE -ne 0) {throw "TwentyWatts $Action FAILED (exit $LASTEXITCODE)"}
-  if ($Repeat) {Start-Sleep -Seconds $IntervalSeconds}
-} while ($Repeat)
+function Invoke-Research([string]$Step) {
+  & $PythonExe -c $Runner $Root $Step $SourceDB $StateDB "$Batches" "$Cycles" "$Participants" $Report
+  if ($LASTEXITCODE -ne 0) { throw "TwentyWatts $Step failed ($LASTEXITCODE); halted, no promotion or publish" }
+}
+if ($Action -eq 'verify') {
+  Invoke-Research 'test'
+  Invoke-Research 'inspect'
+  Invoke-Research 'gate'
+  Write-Host '[PASS] Operational verification complete. Certification is separately gated.' -ForegroundColor Green
+} else {
+  Invoke-Research $Action
+}

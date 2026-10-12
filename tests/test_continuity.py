@@ -3,7 +3,8 @@ from pathlib import Path
 from tw9.continuity import run, init_db, agent_pool, restore
 from tw8.arena import registry
 
-SOURCE=Path(__file__).resolve().parents[1]/'data'/'v8.sqlite'
+from fixture_source import source_db
+SOURCE=source_db()
 
 class V9Tests(unittest.TestCase):
     def test_real_source_pool(self):
@@ -31,7 +32,8 @@ class V9Tests(unittest.TestCase):
             db=init_db(path)
             try:
                 for sid,cycles,state in db.execute('SELECT id,cycles,state FROM agents'):
-                    self.assertEqual(json.loads(state)['steps'],cycles*48)
+                    self.assertEqual(json.loads(state)['experience_steps'],cycles*48)
+                    self.assertLessEqual(json.loads(state)['steps'],cycles*48)
             finally:db.close()
     def test_pool_mutation_refused(self):
         with tempfile.TemporaryDirectory() as d:

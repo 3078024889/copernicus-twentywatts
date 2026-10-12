@@ -52,16 +52,3 @@ def execute(v8db, v9db, cycles, participants=12):
         raise RuntimeError('Failed post-run integrity gate')
     results['source_validation']=status['source']; results['protocol_operations']=PROTOCOL
     return results
-
-def main():
-    ap=argparse.ArgumentParser(description='TwentyWatts bounded restartable research operations')
-    ap.add_argument('action',choices=('inspect','run'))
-    ap.add_argument('--v8-db',default='data/v8.sqlite');ap.add_argument('--db',default='data/v9.sqlite')
-    ap.add_argument('--cycles',type=int,default=1);ap.add_argument('--participants',type=int,default=12)
-    ap.add_argument('--output',default='reports/operations.json')
-    a=ap.parse_args()
-    result=inspect(a.v8_db,a.db) if a.action=='inspect' else execute(a.v8_db,a.db,a.cycles,a.participants)
-    p=Path(a.output);p.parent.mkdir(parents=True,exist_ok=True)
-    tmp=p.with_suffix(p.suffix+'.tmp');tmp.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');os.replace(tmp,p)
-    print(json.dumps(result,ensure_ascii=False,indent=2))
-if __name__=='__main__':main()
