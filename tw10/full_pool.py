@@ -10,7 +10,7 @@ from pathlib import Path
 from tw8.arena import Candidate, Learner, dataset, registry, PROTOCOL as SOURCE_PROTOCOL
 from tw10.guard import choose
 
-PROTOCOL = 'TW15_ALL_CONFIGS_LONGITUDINAL_V1'
+PROTOCOL = 'TW20_FAIR_ALL_CONFIGS_V2'
 TASKS = ('linear', 'interaction', 'shift')
 EXPECTED = 7777
 
@@ -83,8 +83,10 @@ def cycle_once(db, c):
         raise ValueError('Corrupt state weights')
     learner.w = [float(w) for w in prev['weights']]
     learner.steps = int(prev['steps'])
-    task = TASKS[(cycle + (c.index % 3)) % 3]
-    seed = 2000000 + cycle*7919 + c.index
+    # Each candidate sees exactly the same task and examples at a given cycle.
+    # Candidate-dependent task/seed would invalidate a fair competition.
+    task = TASKS[cycle % len(TASKS)]
+    seed = 2000000 + cycle*7919
     train = dataset(seed,task,48)
     audit = dataset(seed+9000000,task,96)
     before = learner.accuracy(audit)
@@ -103,7 +105,7 @@ def cycle_once(db, c):
             'gain_vs_cold':after-cold.accuracy(audit),
             'gain_vs_sham':after-sham.accuracy(audit),
             'selection_independent_from_audit':True,
-            'scope':'SYNTHETIC_ONLY'}
+            'scope':'SYNTHETIC_ONLY','fairness_protocol':'SHARED_TASK_SEED_PER_CYCLE'}
     new_state=json.dumps({'weights':winner.w,'steps':winner.steps},sort_keys=True)
     with db:
         updated=db.execute('''UPDATE candidates SET state=?, cycles=cycles+1,
@@ -126,15 +128,16 @@ def batch(db, *, limit=64):
     return {'advanced':len(reports),'reset_count':sum(r['guard']=='reset' for r in reports),
             'mean_gain_vs_cold':round(statistics.fmean(r['gain_vs_cold'] for r in reports),6),
             'mean_gain_vs_sham':round(statistics.fmean(r['gain_vs_sham'] for r in reports),6),
+            'mean_holdout_accuracy':round(statistics.fmean(r['after'] for r in reports),6),
             'status':status(db)}
 
 
-def status(db):
+def status(db, *, deep_check=True):
     n,min_cycle,max_cycle,sum_cycles,steps=db.execute('''SELECT COUNT(*),MIN(cycles),MAX(cycles),SUM(cycles),
         SUM(experience_steps) FROM candidates''').fetchone()
     touched=db.execute('SELECT COUNT(*) FROM candidates WHERE cycles>0').fetchone()[0]
     records=db.execute('SELECT COUNT(*) FROM audits WHERE protocol=?',(PROTOCOL,)).fetchone()[0]
     return {'registered':n,'trained_distinct':touched,'min_cycles':min_cycle,'max_cycles':max_cycle,
             'total_cycles':sum_cycles,'experience_steps':steps,'audit_records':records,
-            'integrity':db.execute('PRAGMA quick_check').fetchone()[0],
+            'integrity':db.execute('PRAGMA quick_check').fetchone()[0] if deep_check else 'NOT_CHECKED_IN_POLL',
             'certified_ai':0,'mother_promotion':'LOCKED'}
