@@ -12,6 +12,7 @@ import sqlite3
 from contextlib import closing
 import statistics
 from tw8.arena import Candidate, Learner, dataset
+from tw10.resource_meter import count_operation, measured_evaluation
 
 PROTOCOL = 'TW18_ARCHITECTURE_PAIRED_V1'
 STAGES = ('linear', 'interaction', 'shift', 'linear')
@@ -23,11 +24,13 @@ class GaussianNB:
         self.sums = [[0., 0.], [0., 0.]]
         self.squares = [[0., 0.], [0., 0.]]
     def update(self, x, y):
+        count_operation()
         self.count[y] += 1
         for j in range(2):
             self.sums[y][j] += x[j]
             self.squares[y][j] += x[j]*x[j]
     def predict(self,x):
+        count_operation()
         total = sum(self.count)
         scores=[]
         for c in (0,1):
@@ -46,9 +49,11 @@ class BoundedKNN:
     def __init__(self, limit=64, k=5):
         self.memory=[]; self.limit=limit; self.k=k
     def update(self,x,y):
+        count_operation()
         self.memory.append((tuple(x),y))
         if len(self.memory)>self.limit:self.memory.pop(0)
     def predict(self,x):
+        count_operation()
         if not self.memory:return 0.5
         nearest=sorted(self.memory,key=lambda a:(a[0][0]-x[0])**2+(a[0][1]-x[1])**2)[:self.k]
         return sum(y for _,y in nearest)/len(nearest)
@@ -62,6 +67,7 @@ def construct(name):
     if name=='bounded_knn':return BoundedKNN()
     raise ValueError(name)
 
+@measured_evaluation
 def evaluate(name,seed):
     if name not in ARCHITECTURES or not isinstance(seed,int) or seed<1:raise ValueError('invalid architecture or seed')
     learner=construct(name)

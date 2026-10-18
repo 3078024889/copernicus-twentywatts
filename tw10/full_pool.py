@@ -11,6 +11,9 @@ from tw8.arena import Candidate, Learner, dataset, registry, PROTOCOL as SOURCE_
 from tw10.guard import choose
 
 PROTOCOL = 'TW15_ALL_CONFIGS_LONGITUDINAL_V1'
+
+class StopRequested(Exception):
+    """Cooperative cancellation before a candidate state commit."""
 TASKS = ('linear', 'interaction', 'shift')
 EXPECTED = 7777
 
@@ -73,7 +76,9 @@ def bootstrap(db, source):
     return {'candidates':EXPECTED,'screen':screen,'holdout':holdout}
 
 
-def cycle_once(db, c):
+def cycle_once(db, c, *, should_stop=None):
+    if should_stop is not None and should_stop():
+        raise StopRequested()
     row = db.execute('SELECT state,cycles,experience_steps FROM candidates WHERE id=?',(c.key,)).fetchone()
     if row is None: raise ValueError(f'Unknown candidate {c.key}')
     state_json, cycle, experience = row
@@ -106,6 +111,9 @@ def cycle_once(db, c):
             'scope':'SYNTHETIC_ONLY'}
     new_state=json.dumps({'weights':winner.w,'steps':winner.steps},sort_keys=True)
     with db:
+        # Recheck immediately before the first persistent mutation.
+        if should_stop is not None and should_stop():
+            raise StopRequested()
         updated=db.execute('''UPDATE candidates SET state=?, cycles=cycles+1,
             experience_steps=experience_steps+48,last_task=?,updated_at=CURRENT_TIMESTAMP
             WHERE id=? AND cycles=?''',(new_state,task,c.key,cycle)).rowcount
@@ -115,17 +123,25 @@ def cycle_once(db, c):
     return report
 
 
-def batch(db, *, limit=64):
+def batch(db, *, limit=64, should_stop=None):
     if not isinstance(limit,int) or not 1 <= limit <= 7777: raise ValueError('limit must be 1..7777')
-    # Fair minimum-cycles-first scheduler: every candidate reaches its next
-    # cycle before a higher-cycle candidate is scheduled. No static top-12.
     ids=[x[0] for x in db.execute('SELECT id FROM candidates ORDER BY cycles ASC, id ASC LIMIT ?', (limit,))]
     all_defs={c.key:c for c in registry()}
     reports=[]
-    for cid in ids: reports.append(cycle_once(db,all_defs[cid]))
-    return {'advanced':len(reports),'reset_count':sum(r['guard']=='reset' for r in reports),
-            'mean_gain_vs_cold':round(statistics.fmean(r['gain_vs_cold'] for r in reports),6),
-            'mean_gain_vs_sham':round(statistics.fmean(r['gain_vs_sham'] for r in reports),6),
+    stopped=False
+    for cid in ids:
+        if should_stop is not None and should_stop():
+            stopped=True
+            break
+        try:
+            reports.append(cycle_once(db, all_defs[cid], should_stop=should_stop))
+        except StopRequested:
+            stopped=True
+            break
+    return {'advanced':len(reports),'stopped':stopped,
+            'reset_count':sum(r['guard']=='reset' for r in reports),
+            'mean_gain_vs_cold':round(statistics.fmean(r['gain_vs_cold'] for r in reports),6) if reports else 0.0,
+            'mean_gain_vs_sham':round(statistics.fmean(r['gain_vs_sham'] for r in reports),6) if reports else 0.0,
             'status':status(db)}
 
 

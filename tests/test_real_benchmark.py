@@ -16,7 +16,11 @@ class ExternalBenchmarkTests(unittest.TestCase):
     def test_real_datasets_reproducible_and_not_certified(self):
         try:r=evaluate(314159,8)
         except RuntimeError as e:self.skipTest(str(e))
-        self.assertEqual(r,evaluate(314159,8))
+        again = evaluate(314159,8)
+        for item in (r, again):
+            item.pop("resource_measurement", None)
+            item.pop("operation_count_semantics", None)
+        self.assertEqual(r, again)
         self.assertEqual(len(r['results']),2)
         self.assertFalse(r['scientific_certification'])
         self.assertEqual(r['certified_independent_ais'],0)

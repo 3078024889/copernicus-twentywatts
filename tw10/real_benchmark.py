@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib, json, math, random, statistics
 from pathlib import Path
 from tw8.arena import Learner, registry
+from tw10.resource_meter import measured_evaluation
 
 PROTOCOL = 'TW12_REAL_DATA_BENCHMARK_V1'
 
@@ -52,6 +53,7 @@ def _normalize(train,other):
     return transform(train),transform(other)
 
 
+@measured_evaluation
 def evaluate(seed=314159, candidate_cap=24):
     if not (1 <= candidate_cap <= 100):raise ValueError('candidate_cap must be 1..100')
     families={}

@@ -79,7 +79,14 @@ class OfflineRuntime:
             try:
                 if self.all_configs:
                     with closing(pool_init(self.state)) as db:
-                        result=pool_batch(db,limit=self.participants)
+                        result=pool_batch(
+                            db,
+                            limit=self.participants,
+                            should_stop=lambda: self.shutdown.is_set() or self.stop_file.exists(),
+                        )
+                    if result.get('stopped'):
+                        self.update(status='STOP_REQUESTED')
+                        break
                     latest={'advanced_this_run':result['advanced'],
                             'evidence_records':result['status']['audit_records'],
                             'trained_distinct':result['status']['trained_distinct'],
@@ -103,17 +110,35 @@ class OfflineRuntime:
         if self.worker['status'] not in ('ERROR','STOP_REQUESTED'):
             self.update(status='STOPPED')
     def start(self):
-        if self.all_configs:
-            with closing(pool_init(self.state)) as db: pool_bootstrap(db,self.source)
-        self.snapshot() # Validate before network binds
-        if not self.source.is_file():raise FileNotFoundError(self.source)
+        # A pre-existing stop request must not initialize writable state.
         if self.stop_file.exists():
-            self.update(status='STOP_REQUESTED')
+            self.worker["status"] = "STOP_REQUESTED"
             return
+
+        if not self.source.is_file():
+            raise FileNotFoundError(self.source)
+
+        # Recheck after source validation, immediately before writable initialization.
+        if self.stop_file.exists():
+            self.worker["status"] = "STOP_REQUESTED"
+            return
+
+        if self.all_configs:
+            with closing(pool_init(self.state)) as db:
+                pool_bootstrap(db, self.source)
+
+        self.snapshot()  # Validate before network binds.
+
         if self.training:
-            self.thread=threading.Thread(target=self.work_loop,name='TWOfflineLearner',daemon=True)
+            self.thread = threading.Thread(
+                target=self.work_loop,
+                name="TWOfflineLearner",
+                daemon=True,
+            )
             self.thread.start()
-        else:self.update(status='READ_ONLY')
+        else:
+            self.update(status="READ_ONLY")
+
     def stop(self):
         self.shutdown.set()
         if self.thread:self.thread.join(timeout=15)
@@ -168,10 +193,10 @@ def main(argv=None):
     a=ap.parse_args(argv)
     if a.state_db.resolve() in {a.source_db.resolve(),(a.source_db.resolve().parent/'v9.sqlite').resolve()}:
         ap.error('Refusing legacy/source state database')
-    # Refuse silent startup without the correct original evidence pool.
-    if a.all_configs:
-        with closing(pool_init(a.state_db)) as db:pool_bootstrap(db,a.source_db)
-    else:inspect(a.source_db,a.state_db)
+    # Read-only inspection is safe here. Writable initialization belongs
+    # exclusively to OfflineRuntime.start(), after its stop-file check.
+    if not a.all_configs:
+        inspect(a.source_db,a.state_db)
     runtime=OfflineRuntime(a.source_db,a.state_db,interval=a.interval,cycles=a.cycles,
                            participants=a.participants,stop_file=a.stop_file,report=a.report,training=not a.read_only,all_configs=a.all_configs)
     print(f'OFFLINE_ORACLE http://127.0.0.1:{a.port}/',flush=True)

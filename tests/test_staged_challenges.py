@@ -18,7 +18,12 @@ class StagedChallengeTests(unittest.TestCase):
             for field in ('train_fingerprint','selector_fingerprint','holdout_fingerprint'):
                 self.assertEqual(x[field],y[field])
     def test_reproducibility(self):
-        self.assertEqual(evaluate(registry()[11],3),evaluate(registry()[11],3))
+        a = evaluate(registry()[11],3)
+        b = evaluate(registry()[11],3)
+        for item in (a, b):
+            item.pop("resource_measurement", None)
+            item.pop("operation_count_semantics", None)
+        self.assertEqual(a, b)
     def test_idempotency(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'staged.sqlite'

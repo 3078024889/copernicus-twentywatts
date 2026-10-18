@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse, hashlib, json, math, random, sqlite3, statistics, time
 from dataclasses import dataclass
 from pathlib import Path
+from tw10.resource_meter import count_operation
 
 PROTOCOL = 'TW8_7777_COMPETITION_V1'
 FAMILIES = ('linear', 'interaction')
@@ -52,9 +53,11 @@ class Learner:
         self.c=c;self.w=[0.0]*(4 if c.family=='interaction' else 3);self.steps=0
     def features(self,x):return [1.0,x[0],x[1]]+([x[0]*x[1]] if self.c.family=='interaction' else [])
     def predict(self,x):
+        count_operation()
         z=sum(w*v for w,v in zip(self.w,self.features(x)))
         return 1/(1+math.exp(-max(-30,min(30,z))))
     def update(self,x,y):
+        count_operation()
         p=self.predict(x)
         r=self.c.rate/(1+self.steps/24)**.5 if self.c.update=='decay' else self.c.rate
         v=self.features(x)

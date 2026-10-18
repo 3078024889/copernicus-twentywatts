@@ -13,11 +13,13 @@ import random
 import sqlite3
 import statistics
 from tw8.arena import Learner, dataset, registry
+from tw10.resource_meter import measured_evaluation
 
 PROTOCOL = 'TW17_PAIRED_STAGED_CHALLENGES_V2'
 STAGES = ('linear', 'interaction', 'shift', 'linear')
 
 
+@measured_evaluation
 def evaluate(candidate, seed):
     """Four experiences: task acquisition, non-linear challenge, transfer, retention.
 

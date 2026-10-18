@@ -15,7 +15,12 @@ class ArchitectureAuditTests(unittest.TestCase):
         for i in range(30):m.update((i/30,0),i%2)
         self.assertEqual(len(m.memory),8)
     def test_paired_reproducible(self):
-        self.assertEqual(evaluate('gaussian_nb',201),evaluate('gaussian_nb',201))
+        a = evaluate('gaussian_nb',201)
+        b = evaluate('gaussian_nb',201)
+        for item in (a, b):
+            item.pop("resource_measurement", None)
+            item.pop("operation_count_semantics", None)
+        self.assertEqual(a, b)
         self.assertNotEqual(evaluate('gaussian_nb',201),evaluate('gaussian_nb',202))
     def test_database_resume_and_scope(self):
         with tempfile.TemporaryDirectory() as d:
